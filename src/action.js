@@ -5,7 +5,7 @@ const got = require('got').default;
 const jsonata = require('jsonata');
 const { auth: { retrieveToken }, secrets: { getSecrets } } = require('./index');
 
-const AUTH_METHODS = ['approle', 'token', 'github', 'jwt'];
+const AUTH_METHODS = ['approle', 'token', 'github', 'jwt', 'kubernetes'];
 
 async function exportSecrets() {
     const vaultUrl = core.getInput('url', { required: true });
@@ -14,7 +14,7 @@ async function exportSecrets() {
     const exportEnv = core.getInput('exportEnv', { required: false }) != 'false';
     const exportToken = (core.getInput('exportToken', { required: false }) || 'false').toLowerCase() != 'false';
 
-    const secretsInput = core.getInput('secrets', { required: true });
+    const secretsInput = core.getInput('secrets', { required: false });
     const secretRequests = parseSecretsInput(secretsInput);
 
     const vaultMethod = (core.getInput('method', { required: false }) || 'token').toLowerCase();
@@ -26,7 +26,15 @@ async function exportSecrets() {
     const defaultOptions = {
         prefixUrl: vaultUrl,
         headers: {},
-        https: {}
+        https: {},
+        retry: {
+            statusCodes: [
+                ...got.defaults.options.retry.statusCodes,
+                // Vault returns 412 when the token in use hasn't yet been replicated
+                // to the performance replica queried. See issue #332.
+                412,
+            ]
+        }
     }
 
     const tlsSkipVerify = (core.getInput('tlsSkipVerify', { required: false }) || 'false').toLowerCase() != 'false';
@@ -103,6 +111,10 @@ async function exportSecrets() {
  * @param {string} secretsInput
  */
 function parseSecretsInput(secretsInput) {
+    if (!secretsInput) {
+      return []
+    }
+
     const secrets = secretsInput
         .split(';')
         .filter(key => !!key)
